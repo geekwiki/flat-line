@@ -2463,6 +2463,31 @@ function getTypeof(value, inspect, returnTypes, flaggedVals) {
     /* $lab:coverage:on$ */
 }
 
+
+/**
+ * This is essentially the same thing as _.isEmpty, except instead of returning 
+ * false when given an array of empty arrays, this will return true
+ *
+ * @param   {*}         obj     Value to iterate over and checking for values
+ * @returns {boolean}           True if the object contains no populated values 
+ *                              (other than other objects)
+ * @example  
+ *          _.isEmptyDeep([ [], {}, null, [ null, [ 0, '', true ] ] ])  // true
+ *          _.isEmptyDeep([ 0, [ '', [ null, [ 0, 'TEST' ] ] ] ])       // false
+ */
+function isEmptyDeep( obj ){
+    if ( _.isObject( obj ) && ! _.isEmpty( obj ) ){
+
+        var fnd = _.find( obj, function( o ){
+            return ! isEmptyDeep( o )
+        } )
+
+        return ! fnd
+    }
+      
+    return _.isEmpty( obj )
+}
+
 var defaultMixins = {
     md5: md5,
     swap: swap,
@@ -2508,6 +2533,7 @@ var defaultMixins = {
     isCountable: isCountable,
     dontEndWith: dontEndWith,
     levenshtein: levenshtein,
+    isEmptyDeep: isEmptyDeep,
     includesAll: includesAll,
     validPattern: validPattern,
     passwordHash: passwordHash,
