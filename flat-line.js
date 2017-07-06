@@ -47,9 +47,286 @@ const _internals = {
         '>': '&gt;',
         '"': '&quot;',
         "'": '&#039;'
+    },
+    /**
+     * Data types - Object containing logic for validating data types, as well
+     * as converting data to said type
+     */
+    dataTypeLogic: {
+      array: {
+        validate: _.isArray,
+        convert: {
+          check: _.isArrayLike,
+          modify: _.toArray
+        }
+      },
+      object: {
+        validate: _.isObject,
+        convert: {
+          check: _.isObjectLike,
+          modify: _.toPlainObject
+        }
+      },
+      string: {
+        validate: _.isString
+      },
+      number: {
+        validate: _.isNumber,
+        convert: {
+          check: v => _.toNumber( v ) == v,
+          modify: _.toNumber
+        }
+      },
+      float: {
+        validate: v => parseFloat( v ) == v,
+        convert: {
+          check: v => parseFloat( v ) == v,
+          modify: parseFloat
+        }
+      },
+      integer: {
+        validate: _.isInteger,
+        convert: {
+          check: v => parseInt( v ) == v,
+          modify: parseInt
+        }
+      },
+      function: {
+        validate: _.isFunction
+      },
+      boolean: {
+        validate: _.isBoolean,
+        convert: {
+          //check: v => {},
+          modify: v => !!v
+        }
+      },
+      date: {
+        validate: _.isDate,
+        convert: {
+          check: v => {
+            if ( typeof v !== 'string' || ! v.length )
+              return false
+
+            let v2 = new Date( v )
+            return v2 !== 'Invalid Date'
+          },
+          modify: v => new Date( v )
+        }
+      }
     }
 }
 
+/**
+ * Check if a value matches one of the types specified; Optionally attempt to
+ * convert the value to one of the specified values
+ *
+ * @param   {string|array}  types     Type or types to validate. These values must exist as
+ *                                    a key inside the _internals.dataTypeLogic object.
+ * @param   {*}             value     Value to validate against the types
+ * @param   {boolean}       convert   Attempt to convert the value to one of the
+ *                                    types (EG: "12" -> 12 for number)
+ * @return  {boolean}       If the value matches any of the types
+ * @note    Valid types: array, object, string, number, float, integer, function,
+ *                       boolean, date
+ * @todo    Create unit test
+ * @example isType('string', 'Hello World')
+ *            // => true
+ * @example isType(['float','integer'], '123')
+ *            // => false
+ * @example isType(['float','integer'], '123', true)
+ *            // => true
+ * @example isType(['object','function'], console.log )
+ *            // => true
+ */
+function isType( types, value, convert ){
+  /**
+   * Object containing the logic for validating value types
+   */
+  const typeLogic = _internals.dataTypeLogic
+
+  // Valid types allowed
+  const validTypes = Object.keys( typeLogic )
+
+  // If the types param isn't an array, then convert it to one if its a string
+  if ( _.isEmpty( types ) ){
+    throw new Error( `No value specified for "types" parameter - Expecting a string or an array` )
+    return false
+  }
+
+  // If its a string, convert it to an array
+  if ( _.isString( types ) )
+    types = [ types ]
+
+  // If its an object, get the values
+  else if ( _.isObject( types ) )
+    types = _.values( types )
+
+  // If an array hasnt been provided or created, then fail
+  if ( ! _.isArray( types ) ){
+    throw new Error( `Illegal value specified for "types" parameter - Expecting a string or an array, received a ${typeof types}` )
+    return false
+  }
+
+  // Iterate over the provided types, looking for the first successful type validation
+  var result = _.chain( types )
+    .map( _.trim )
+    .map( _.lowerCase )
+    .filter( ( type, idx ) => {
+      // If this type isn't found in the validTypes, then throw an error
+      if ( validTypes.indexOf( type ) === -1 ){
+        throw new TypeError( 'The specified type "' + type + '" is not a valid type - Must be one of: ' + validTypes.join(', ') )
+        return false
+      }
+
+      // If this type only contains the validation function..
+      if ( _.isFunction( typeLogic[ type ] ) )
+        return typeLogic[ type ]( value )
+
+      // If theres no validate function, then error
+      if ( ! _.isFunction( typeLogic[ type ].validate ) ){
+        throw new TypeError( 'No "validate" function specified for the type "' + type + '"' )
+        return false
+      }
+
+      // If it validates without any conversion, return true
+      if ( typeLogic[ type ].validate( value ) )
+        return true
+
+      if ( convert === false || typeof typeLogic[ type ].convert === 'undefined' )
+        return false
+
+      // If the convert is a function.. then use it
+      if ( _.isFunction( typeLogic[ type ].convert ) ){
+        value = typeLogic[ type ].convert( value )
+      }
+
+      // If its an object..
+      else if ( _.isPlainObject( typeLogic[ type ].convert ) ){
+        // If the check is a function, and it fails, then return false
+        if ( _.isFunction( typeLogic[ type ].convert.check ) && ! typeLogic[ type ].convert.check( value ) )
+            return false
+
+        // No modify conversion function provided - fail
+        if ( typeof typeLogic[ type ].convert.modify !== 'function' )
+          return false
+
+        // Attempt to modify the value
+        value = typeLogic[ type ].convert.modify( value )
+      }
+
+      // If the convert isnt a function or an object..
+      else {
+        return false
+      }
+
+      // Check the converted value
+      return typeLogic[ type ].validate( value )
+    })
+    .some()
+    .value()
+
+  return result
+}
+
+/**
+ * Iterate over an array, returning the first value that matches the type specified.
+ * Optinally attempt to convert the values to said type, if possible.
+ *
+ * @param   {string}    type      Type to return
+ * @param   {array}     values    Values to iterate over (from left to right)
+ * @param   {boolean}   convert   Attempt to convert the value to type
+ * @todo    Create unit tests
+ * @return  {mixed}     Returns the first value that matches the type specified
+ * @example _.firstDefault( 'number', [null, '12', ['foo','bar'], 'test', 45] )
+ *            // => 45
+ * @example _.firstDefault( 'number', [null, '12', ['foo','bar'], 'test', 45], true )
+ *            // => 12
+ * @example _.firstDefault( 'string', [null, '12', ['foo','bar'], 'test', 45] )
+ *            // => '12'
+ * @example _.firstDefault( 'array', [null, '12', ['foo','bar'], 'test', 45] )
+ *            // => ['foo','bar']
+ */
+function firstDefault( type, values, convert ){
+  const dataTypes = Object.keys( _internals.dataTypeLogic )
+
+  if ( ! type || ! _.isString( type ) ){
+    throw new TypeError( `Empty or invalid value type specified for "type" parameter` )
+    return false
+  }
+
+  if ( _.isEmpty( values ) ){
+    throw new TypeError( `No values specified - must provide an array of data` )
+    return false
+  }
+
+  type = _.trim( _.lowerCase( type ) )
+
+  if ( dataTypes.indexOf( type ) === -1 ){
+    throw new TypeError( `Invalid value specified for "type" parameter ("${type}") - expecting one of: ${dataTypes.join(', ')}` )
+    return false
+  }
+
+  return _.chain( values )
+    .toArray()
+    .map( val => _.isString( val ) ? _.trim( val ) : val )
+    .filter( val => ! _.isEmpty( val ) )
+    .find( val => isType( type, val, convert ) )
+    .value()
+
+    /*
+    .map( v => {
+      if ( _.isEmpty( v ) )
+        return v
+
+      switch( type ){
+        case 'string':
+          if ( _.isString( v ) )
+            return _.trim( v )
+          break
+
+        case 'integer':
+          if ( convert === true && parseInt( v ) == v  )
+            return _.toSafeInteger( v )
+          break
+
+        case 'number':
+          if ( convert === true && parseFloat( v ) == v )
+            return parseFloat( v )
+          break
+
+        case 'array':
+          if ( convert === true )
+            return _.toArray( v )
+          break
+      }
+
+      return v
+    })
+    .filter( v => {
+      if ( type === 'string' )
+        return _.isString(v) && ! _.isEmpty(v)
+
+      if ( type === 'integer' )
+        return _.isInteger( ( convert && parseInt(v) == v )
+          ? _.toSafeInteger(v)
+          : v )
+
+      if ( type === 'number' )
+        return _.isNumber( ( convert === true && parseFloat(v) == v )
+          ? parseFloat(v)
+          : v )
+
+      return ! _.isEmpty(v)
+    } )
+    .first()
+    .value()
+    */
+}
+
+/**
+ *
+ */
 function generateSlug(){
     // https://confluence.atlassian.com/bitbucket/what-is-a-slug-224395839.html
 }
@@ -87,11 +364,11 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
         e: function(){ _l.out( 'error', arguments ) },
     }
 
-    
+
     // Functions to validate the parameter values
     var paramValidators = {
         /**
-         * Name - Needs to contain some alpha characters (_.isString would pass a value containing only numbers 
+         * Name - Needs to contain some alpha characters (_.isString would pass a value containing only numbers
          * or special characters)
          */
         name:       name => !( _.isEmpty( name ) || ! _.isFunction( name.match ) || ! name.match( /[a-zA-Z]/ ) ),
@@ -100,7 +377,7 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
          */
         maxLength:  leng => ( parseInt( leng ) == leng && leng > 0 ),
         /**
-         * Unique value - Needs to be an array (of existing values), a function (which accepts a string and 
+         * Unique value - Needs to be an array (of existing values), a function (which accepts a string and
          * verifies its unique) or false (disabling unique validations)
          */
         unique:     uniq => ( _.isArray( uniq ) || _.isFunction( uniq ) || uniq === false ),
@@ -109,7 +386,7 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
          */
         condense:   cond => ( _.isBoolean( cond ) )
     }
-    
+
     // Set default values in the initial cfg object
     var cfg = {
         name    : null,
@@ -123,16 +400,16 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
             segment: '[a-zA-Z0-9-]+'
         }
     }
-    
+
     var valInfo = val => `Value Type: ${Object.prototype.toString.call( val )}; Value (JSON): ${JSON.stringify(val)}`
 
     // If the first parameter is an object, then its expected to hold all the values
     if ( _.isObject( arguments[0] ) ){
-        
+
         // Iterate over the items in the first parameter, processing each value as a config item, based on the key
         _.forEach( arguments[0], ( value, key ) => {
             //paramInfo = `Key: ${key}; Value Type: ${Object.prototype.toString.call( value )}; Value (JSON): ${JSON.stringify(value)}`
-        
+
             //console.debug( '> KEY: %s; VALUE: %s', key, JSON.stringify(value))
             // Use a switch statement to accommodate aliases for the setting names
             switch( _.toLower( key ) ){
@@ -142,10 +419,10 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
                         //throw new Error( `Invalid value provided for the name/title (Key: ${key}; ${valInfo(value)})` )
                         return
                     }
-                    
+
                     cfg.name = value
                     break
-                    
+
                 case 'maxlength':
                 case 'max':
                 case 'length':
@@ -154,20 +431,20 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
                         //throw new Error( `Invalid value provided for the maximum length (Key: ${key}; ${valInfo(value)})` )
                         return
                     }
-                    
+
                     cfg.length = parseInt( value )
                     break
-                    
+
                 case 'unique':
                 case 'distinct':
                     if ( ! paramValidators.unique( value ) ){
                         //throw new Error( `Invalid value provided for the unique validator (Key: ${key}; ${valInfo(value)})` )
                         return
                     }
-                    
+
                     cfg.unique = value
                     break
-                    
+
                 case 'condensedupchars':
                 case 'condenseduplicatechars':
                 case 'condenseduplicates':
@@ -178,11 +455,11 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
                     if ( ! paramValidators.condense( value ) ){
                         //throw new Error( `Invalid value provided for the duplicate character condenser (Key: ${key}; ${valInfo(value)})` )
                         return
-                    }   
-                    
-                    cfg.condense = !!value          
+                    }
+
+                    cfg.condense = !!value
                     break
-                    
+
                 default:
                     console.warn( `Unknown setting found in the object provided - Key: ${key}; ${valInfo(value)}` )
                     break
@@ -197,7 +474,7 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
             _l.e( 'Invalid value provided for the name/title (%s)', valInfo( cfgOrName ) )
             return
         }
-                    
+
         cfg.name = cfgOrName
 
         // Max Length -------------------------
@@ -205,7 +482,7 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
             if ( ! paramValidators.maxLength( maxLength ) ){
                 _l.w( 'Invalid value provided for the maximum length (%s)', valInfo( cfgOrName ) )
             }
-                        
+
             cfg.length = parseInt( maxLength )
         }
 
@@ -215,7 +492,7 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
             if ( ! paramValidators.unique( unique ) ){
                 _l.w( 'Invalid value provided for the unique validator (%s)', valInfo( cfgOrName ) )
             }
-                        
+
             cfg.unique = unique
         }
 
@@ -224,19 +501,19 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
         if ( ! _.isUndefined( condenseDupChars ) ){
             if ( ! paramValidators.condense( condenseDupChars ) ){
                 _l.w( 'Invalid value provided for the duplicate character condenser (%s)', valInfo( cfgOrName ) )
-            }   
-                        
-            cfg.condense = !!condenseDupChars   
+            }
+
+            cfg.condense = !!condenseDupChars
         }
     }
 
-    // 
+    //
     else {
         //throw new Error( 'Invalid or undefined values provided' )
         return undefined
     }
 
-    // Convert the unique config value to an executable function 
+    // Convert the unique config value to an executable function
     cfg.isUnique = ( uniqueCfg => {
         console.log('[cfg.unique IIFE] PARAM uniqueCfg:',uniqueCfg)
         // If its already a function, just return it
@@ -255,8 +532,8 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
 
     // Convert the regex string to a real regex object
     cfg.segRegex = new RegExp( cfg.regex.segment, 'g' )
-    
-        
+
+
     /**
      * Takes a string and returns a version of said string:
      *  - Converted to uppercase
@@ -274,14 +551,14 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
         _pName = _pName.replace(/[^A-Z0-9_]+/g, " ")
 
         _pName = _.trim( _pName )
-        
+
         if ( ! _pName ){
             return false
         }
-        
+
         return _pName
     }
-    
+
     // Internal function to shorten a string by taking one or more characters off of the end
     let _shortenStr = function( _str, _len  ) {
         if ( ! _str || _len == 0 ) return
@@ -301,19 +578,19 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
 
         if ( ! _str || ! _.isString( _str ) || ! _str.hasOwnProperty('length') || _str.length < 1 || (_str.length - _len) < 1 ) {
             _l.w( 'Unable to shorten the string - either due to an invalid value, or the resulting value is zero length (String: "%s"; Trim Length: ")', _str, _len )
-                
+
             return
         }
 
         return _str.substring( 0, _str.length - _len )
     }
-    
+
     // Function to check if the key is unique or not (by using isUniqueOrList, either as an array of existing keys, or a function to check)
     let _makeUnique = function( _key ){
         let i           = 0,
             // Store the original key as it is before any changes
             origBaseKey = _key,
-            // Base key is the portion of the key getting modified, without the numerical values 
+            // Base key is the portion of the key getting modified, without the numerical values
             baseKey     = _key,
             // The modified base key and the numerical incremented digits concatenated together
             uniqueKey   = _key,
@@ -326,7 +603,7 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
             if ( baseKey.length < i.toString().length ){
                 return
             }
-            
+
             // Only append the numerical value if its non-zero
             if ( i !== 0 ){
                 uniqueKey = baseKey + i.toString()
@@ -335,37 +612,37 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
                 // off of the key
                 if ( uniqueKey.length > cfg.length ){
                     var was = uniqueKey
-                    
+
                     baseKey = _shortenStr( baseKey, baseKey.length - (baseKey.length - i.toString().length) )
-                    
+
                     if ( ! baseKey ){
-                        return 
+                        return
                     }
-                    
+
                     uniqueKey = baseKey + i.toString()
                 }
             }
 
             isUnique = cfg.isUnique( uniqueKey )
-            
+
             if ( uniqueKey.length > cfg.length ){
                 _l.w( 'Invalid value provided for the maximum length (%s)', valInfo( cfgOrName ) )
             }
-    
+
             i += 1
-        } 
+        }
         while ( isUnique !== true )
 
         return uniqueKey
     }
-    
+
     let key = ''
     let origName = cfg.name
     let name = cfg.name
 
-    
+
     name = _sanitizeStr( name )
-    
+
     if ( ! name ){
         console.error( 'Failed to generate key for the partition name "%s" - The sanitized version of the name was empty' )
         return
@@ -375,7 +652,7 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
     let nameSegments = _.words( name, cfg.segRegex )
 
     // https://lodash.com/docs/4.16.6#words
-    
+
     // If there arent enough 'words' in the partition name to generate a decent key, then just use the first characters of the partition name itself
     if ( nameSegments.length < cfg.length ){
         key = name.substr( 0, cfg.length )
@@ -385,7 +662,7 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
         // These two are only used if cfg.condense is enabled
         let dupCount = 0
         let lastChar
-        
+
          _.forEach( nameSegments, s => {
             char = _.toUpper( s.charAt(0) )
 
@@ -395,8 +672,8 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
             else {
 
             }
-                        
-            // If duplicate character condensing is enabled, then keep track of the duplicates 
+
+            // If duplicate character condensing is enabled, then keep track of the duplicates
             // (changing a key that would be FOOOD to F03D)
             if ( cfg.condense === true ){
                 // If the current char is the same as the last, then increment the dup count
@@ -407,20 +684,20 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
                     }
 
                     dupCount++
-                    
+
                     return
                 }
-                
+
                 // If its not the same, but we just ended a duplicate character count, then add the duplicate count
                 if ( dupCount > 0 ) {
                     key += dupCount.toString()
 
                     dupCount = 0
                 }
-                
+
                 lastChar = char
-            }           
-            
+            }
+
             key += char
         })
 
@@ -433,9 +710,9 @@ function generateKey( cfgOrName, maxLength, unique, condenseDupChars ){
     if ( ! _.size( key ) ){
         return
     }
-    
+
     key = _makeUnique( key )
-        
+
     return key
 }
 
@@ -850,11 +1127,11 @@ function md5( str ) {
  * @param       {array}     pathArray   Array of paths..
  * @returns     {array}                 Modified version of the provided array
  *
- * @example  
- *  Gizmo.stripCommonRoot([ 
+ * @example
+ *  Gizmo.stripCommonRoot([
  *      '/home/jdoe/app/lib/helpers/mongoose-helper.js',
  *      '/home/jdoe/app/dev/file-foo.js',
- *      '/home/jdoe/app/dev/some-file.js' 
+ *      '/home/jdoe/app/dev/some-file.js'
  * ]).join(', ')
  * // => /lib/helpers/mongoose-helper.js, /dev/file-foo.js, /dev/some-file.js
  */
@@ -894,43 +1171,43 @@ function stripCommonRoot( pathArray ){
             currentVal = null
         }
 
-        // When we reach a segment thats not the same in every path, then set the `result` variable, which will abort 
+        // When we reach a segment thats not the same in every path, then set the `result` variable, which will abort
         // the do/while loop
         else {
             result = _.map( pathsSplit, p => '/' + _.join( p, '/' ) )
         }
     }
     while ( result === null )
-    
+
     return result
 }
 
 /**
- * Iterate through an array of absolute file paths, removing the common paths from each absolute path. The shortened 
- * filenames are returned in an array, while the common path 
+ * Iterate through an array of absolute file paths, removing the common paths from each absolute path. The shortened
+ * filenames are returned in an array, while the common path
  *
  * @function    module:_.sumPaths
  * @alias       module:_.summarizePaths
  * @memberof    module:_
  * @param       {array}     pathArray       Array of paths..
- * @returns     {Object}    pathObj         Object containing the common absolute path, and an array of files (with 
+ * @returns     {Object}    pathObj         Object containing the common absolute path, and an array of files (with
  *                                          paths relative to the common absolute path)
  * @returns     {string}    pathObj.path    The absolute path up to the last common folder that all files share
  * @returns     {array}     pathObj.files   Array of filenames, paths starting where {pathObj.path} left off
  *
- * @example  
- *  _.sumPaths.summarizePaths([ 
+ * @example
+ *  _.sumPaths.summarizePaths([
  *      '/home/jdoe/app/lib/helpers/mongoose-helper.js',
  *      '/home/jdoe/app/dev/file-foo.js',
- *      '/home/jdoe/app/dev/some-file.js' 
+ *      '/home/jdoe/app/dev/some-file.js'
  * ])
  * // => { path: '/home/jdoe/app',
- *          files: [ 
- *              '/lib/helpers/mongoose-helper.js', '/dev/file-foo.js', '/dev/some-file.js' 
- *          ] 
+ *          files: [
+ *              '/lib/helpers/mongoose-helper.js', '/dev/file-foo.js', '/dev/some-file.js'
+ *          ]
  *      }
  */
-function sumPaths( pathArray ){ 
+function sumPaths( pathArray ){
     if( ! _.isArray( pathArray ) ){
         Log.debug( `Expected an array - received ${_.typeof(pathArray)}` )
 
@@ -976,14 +1253,14 @@ function sumPaths( pathArray ){
             currentVal = null
         }
 
-        // When we reach a segment thats not the same in every path, then set the `result` variable, which will abort 
+        // When we reach a segment thats not the same in every path, then set the `result` variable, which will abort
         // the do/while loop
         else {
             result = _.map( pathsSplit, p => '/' + _.join( p, '/' ) )
         }
     }
     while ( result === null )
-    
+
     return {
         path : commonRoot.join('/'),
         files: result
@@ -991,7 +1268,7 @@ function sumPaths( pathArray ){
 }
 
 /**
- * Retrieve the types of values in an array or an object. 
+ * Retrieve the types of values in an array or an object.
  *
  * @name        module:_.valTypes
  * @alias       module:_.valueTypes
@@ -1002,8 +1279,8 @@ function sumPaths( pathArray ){
  * @returns     {array}                         Array of types of values in the collection
  *
  * @example // Example showing how duplicate value types only display the value type once
- *  _.valTypes([ 
- *      1, 'Str', false, [], null, new Array(), undefined, {}, 
+ *  _.valTypes([
+ *      1, 'Str', false, [], null, new Array(), undefined, {},
  *      new Date(), function(){}, (s => `This is a ${s}`)('str')
  *  ]).join(', ').join(', ')
  *  // => number, string, boolean, array, null, undefined, object, date, function
@@ -1011,11 +1288,11 @@ function sumPaths( pathArray ){
  * @example // Using Gizmo.valueTypes to verify all parameters are string types
  *  function onlyAcceptsStringParams( foo, bar, baz, bang ){
  *      var invalidParamTypes = Gizmo.valTypes( arguments, f => ! _.isString(f) )
- *      if( invalidParamTypes.length > 0 ) 
- *          throw new Error( 'Expected ll parameters to be strings - received invalid type(s): ' + invalidParamTypes.join(', ') ) 
+ *      if( invalidParamTypes.length > 0 )
+ *          throw new Error( 'Expected ll parameters to be strings - received invalid type(s): ' + invalidParamTypes.join(', ') )
  *  }
  */
-function valTypes( collection, filter ){ 
+function valTypes( collection, filter ){
 
     if( _.isObject( collection ) ){
         collection = _.values( collection )
@@ -1035,7 +1312,7 @@ function valTypes( collection, filter ){
         .map( _.typeof )
         .map( _.lowerCase )
         .uniq()
-        .value() 
+        .value()
 }
 
 /**
@@ -1047,7 +1324,7 @@ function valTypes( collection, filter ){
  * @memberof    module:_
  * @param       {string}    str     String to calculate hash for
  * @returns     {string}    SHA1 hash
- * @example 
+ * @example
  *  _.sha1('test')
  *  // => a94a8fe5ccb19ba61c4c0873d391e987982fbbd3
  */
@@ -1194,7 +1471,7 @@ function sha1 ( str ) {
  * @param       {string}    str     String to hash
  * @param       {string}    salt    Salt to use for hash
  * @returns     {string}    base64 encoded hash
- * @example 
+ * @example
  *  _.makeHash('superSecretPassword','secret-salt')
  *  // => ebA3UZET3LDQWzl <cut> TUnV5oRxAvOLsA==
  */
@@ -1219,7 +1496,7 @@ function makeHash ( str, salt ) {
  * @param       {number}    length  Length of the desored string (Default: 20)
  * @returns     {string}
  * @todo    Add the ability to specify the 'possible' string characters
- * @example 
+ * @example
  *  _.randStr( 15 )
  *  // => gyC8Q9MABoEjGK6
  */
@@ -1259,7 +1536,7 @@ function randStr ( length ) {
  * @returns     {string}    Parsed/modified version of the provided string
  * @todo    Allow the character parameter to be an array, and use the alternator method to iterate through them while substituting the replacements
  * @todo    Allow the index to be a range
- * @example 
+ * @example
  *  _.replaceAt( 'baz', 2, 'r')
  *  // => bar
  *  _.replaceAt( 'bad-word', [1,2,5,6], '*')
@@ -1281,12 +1558,12 @@ function replaceAt ( str, index, character ) {
             .value()
             .join('')
     }
-    
+
     return str.substr(0, index) + character + str.substr(index+character.length)
 }
 
 /**
- * Return items true type by grabbing the 2nd string content from Object.prototype.toString.call, as opposed to the 
+ * Return items true type by grabbing the 2nd string content from Object.prototype.toString.call, as opposed to the
  * less-specific 'typeof'
  *
  * @name        module:_.getType
@@ -1294,7 +1571,7 @@ function replaceAt ( str, index, character ) {
  * @memberof    module:_
  * @param       {*}     item    Item to retrieve type for
  * @returns     {string}    Type of variable
- * @example 
+ * @example
  *  _.type([])
  *  // => array
  *  _.type({})
@@ -1320,12 +1597,12 @@ function getType ( item ) {
  * @function    module:_.multiReplace
  * @memberof    module:_
  * @param       {string}            str             String to be parsed/returned
- * @param       {(object|array)}    replacements    Replacements, with original string as the key, and replacement as 
+ * @param       {(object|array)}    replacements    Replacements, with original string as the key, and replacement as
  *                                                  the value
- * @param       {string}            modifiers       Regex modifiers to use for search (EG: i for case-insensitivity) 
+ * @param       {string}            modifiers       Regex modifiers to use for search (EG: i for case-insensitivity)
  *                                                  'g' (global) is included by default
  * @returns     {string}    Parsed and modified version of the provided string
- * @example 
+ * @example
  *  _.multiReplace( 'test', { t: 'T'} )
  *  // => TesT
  *  _.multiReplace( 'foo', { FOO: 'bar'}, 'i' )
@@ -1367,7 +1644,7 @@ function multiReplace ( str, replacements, modifiers ) {
             else if(_.isPlainObject(r)) {
                 replacementsObj[ Object.keys(r)[0]] = r[Object.keys(r)[0]]
             }
-            
+
             // Shouldnt ever really get here, but I guess im just paranoid
             else {
                 throw new Error(`Replacement structure illegal - Array of non-array and non-object`)
@@ -1393,7 +1670,7 @@ function multiReplace ( str, replacements, modifiers ) {
  * @memberof    module:_
  * @param       {object}    obj     Object to swap values for
  * @returns     {object}    Returns a version of the original object with the keys and values switched (wherever possible)
- * @example 
+ * @example
  *  _.swap({a:'b', c:'d'})
  *  // => {b:'a', d:'c'}
  */
@@ -1463,15 +1740,15 @@ function uniqObjs ( arr ) {
  * @param       {(string|integer|number)}   num     Number to check
  * @returns     {boolean}
  * @example
- *  _.isNumber( 123 )  
+ *  _.isNumber( 123 )
  *  _.isNumber( '123' )
- *  _.isNumber( 1.2 )  
+ *  _.isNumber( 1.2 )
  *  _.isNumber( '1.2' )
  *  // => true
  *
  *  _.isNumber( 'foo' )
- *  _.isNumber( [] )   
- *  _.isNumber( {} ) 
+ *  _.isNumber( [] )
+ *  _.isNumber( {} )
  *  // => false
  */
 function isNumeric ( num ) {
@@ -1487,12 +1764,12 @@ function isNumeric ( num ) {
  * @param       {string}    email   Email address to validate against pattern
  * @returns     {boolean}
  * @example
- *  _.isEmail( 'j@linux.com' ) 
+ *  _.isEmail( 'j@linux.com' )
  *  // => true
  *
- *  _.isEmail( 'j@linux.c' ) 
- *  _.isEmail( 'jinux.com' ) 
- *  _.isEmail( null )  
+ *  _.isEmail( 'j@linux.c' )
+ *  _.isEmail( 'jinux.com' )
+ *  _.isEmail( null )
  *  // => false
  */
 function isEmail ( email ) {
@@ -1562,11 +1839,11 @@ function sortMatch ( object, source, customizer ) {
  * @function    module:_.bool
  * @memberof    module:_
  * @param       {(string|boolean|integer)}  value           Value to compare
- * @param       {(array|string)}            trues           Any other custom 'true' type variables, an attempt is made 
+ * @param       {(array|string)}            trues           Any other custom 'true' type variables, an attempt is made
  *                                                          to convert any  value to an array
  * @param       {boolean}                   [lower=false]   Process the values after toLowerCase() is called
  * @returns     Boolean casted version of the provided value
- * @example 
+ * @example
  *  _.bool( true ) === true
  *  _.bool( 'true' ) === true
  *  _.bool( 1 ) === true
@@ -1602,9 +1879,9 @@ function bool ( value, trues, lower ) {
  * @memberof    module:_
  * @param       {string}    str         String to parse and modify (if needed)
  * @param       {string}    endChar     String to check for on the ending, and possibly append
- * @returns     {string}    The string returned will be either the exact same string provided, or ${str + endChar} if 
+ * @returns     {string}    The string returned will be either the exact same string provided, or ${str + endChar} if
  *                          the original string doesn't end with the endChar character
- * @example 
+ * @example
  *  _.endWith('/User/john.doe/Documents', '/')
  *  // => /User/john.doe/Documents/
  *  _.endWith('Something else.', '.')
@@ -1627,7 +1904,7 @@ function endWith ( str, endChar ) {
  * @param       {string}    endChar     String to check for on the ending, and possibly remove
  * @returns     {string}    The string returned will be either the exact same string provided, or a version of the
  *                          original string with the value of endChar removed from the end
- * @example 
+ * @example
  *  _.dontEndWith('/v1/resource/name/', '/')
  *  // => /v1/resource/name
  */
@@ -1645,9 +1922,9 @@ function dontEndWith ( str, endChar ) {
  * @memberof    module:_
  * @param       {string}    str         String to parse and modify (if needed)
  * @param       {string}    startChar   String to check for on the beginning, and possibly append
- * @returns     {string}    The string returned will be either the exact same string provided, or ${startChar + str} if 
+ * @returns     {string}    The string returned will be either the exact same string provided, or ${startChar + str} if
  *                          the original string doesn't begin with the startChar character
- * @example 
+ * @example
  *  _.startWith('Documents/', '~/')
  *  // => ~/Documents/
  *  _.startWith('Something else.', '.')
@@ -1673,9 +1950,9 @@ function startWith ( str, startChar ) {
  * @todo Should be able to replace an starting str like // with /
  * @param       {string}    str         String to parse and modify (if needed)
  * @param       {string}    startChar   String to check for on the beginning, and possibly remove
- * @returns     {string}    The string returned will be either the exact same string provided, or a version of the 
+ * @returns     {string}    The string returned will be either the exact same string provided, or a version of the
  *                          original string with the value of startChar removed from the beginning
- * @example 
+ * @example
  *  _.dontStartWith('.unhide-me', '.')
  *  // => unhide-me
  */
@@ -1697,7 +1974,7 @@ function dontStartWith ( str, startChar ) {
  * @returns     {string}    Modified version of ${str}, with all new-line characters replaced with an HTML line break
  * @todo    Another parameter to optionally trim the string before line breaks to get rid of first/last
  * @todo    Another parameter to keep the \n on the end of the newly added </br> tag
- * @example 
+ * @example
  *  _.nl2br("One\r\nTwo\n\rThree\nFour\rFive")
  *  // => One</br>Two</br>Three</br>Four</br>Five
  */
@@ -1718,7 +1995,7 @@ function nl2br ( str, br ) {
  * @returns     {string}    Modified version of ${str}, with all HTML line breaks replaced with new-line characters
  * @todo    Another parameter to optionally trim the string before line breaks to get rid of first/last
  * @todo    Another parameter to keep the \</br> tag on the end of the newly added \n
- * @example 
+ * @example
  *  _.nl2br("One<br>Two</br>Three</BR>Four<BR>Five")
  *  // => One\r\nTwo\r\nThree\r\nFour\r\nFive
  */
@@ -1747,7 +2024,7 @@ function br2nl ( str, nl ) {
  *                                      middle      All BUT first and last
  *                                      partial     Majority of letters (55% after first letter)
  * @returns     {string}    Parsed and censored version of the provided word
- * @example 
+ * @example
  *  _.censor('damn')
  *  // => d**n
  */
@@ -1814,9 +2091,9 @@ function censor ( word, masker, maskType ) {
  * @memberof    module:_
  * @param       {string}    password        Password to hash
  * @returns     {string}    109 character password hash (salt is first 20 characters)
- * @note        Every password hash is generated by using a salt value that is randomly generated every time, this means 
+ * @note        Every password hash is generated by using a salt value that is randomly generated every time, this means
  *              that the resulting hash will be different every time it executes, even if the passwords are the same
- * @example 
+ * @example
  *  const pwd1 = _.passwordHash('SomePass')
  *  // => LIE9OKy0g$eNB <cut> XFMcfx78L5SuZZivA==
  *  const pwd2 = _.passwordHash('SomePass')
@@ -1852,7 +2129,7 @@ function passwordHash ( password ) {
  * @returns     {boolean}   TRUE if the result of a hash generated with the
  *                          same password and the salt found in passwordHash,
  *                          matches the hash inside passwordHash
- * @example 
+ * @example
  *  const hashA = _.passwordHash( 'secret' )
  *  _.passwordVerify( 'secret', hashA )
  *  // => true
@@ -1935,14 +2212,14 @@ function sortObj( obj, comparator ) {
  * @function    module:_.isUniq
  * @memberof    module:_
  * @param       {array}     collection  Single level array or array of objects
- * @param       {string=}   element     If `collection` is an array of objects, and we are to check that a specific 
+ * @param       {string=}   element     If `collection` is an array of objects, and we are to check that a specific
  *                                      element in those objects is unique, then this should be the name of the element
  *                                      in the object
- * @returns     {boolean}  
- * @example 
+ * @returns     {boolean}
+ * @example
  *  _.isUniq( [ 1, 2, 3, 2 ] )
  *  // => false
- *  _.isUniq( [ {a: 1}, {a: 2}, {a: 1} ] ) 
+ *  _.isUniq( [ {a: 1}, {a: 2}, {a: 1} ] )
  *  // => false
  *  _.isUniq( [ {a: 1, b: 2}, {a: 2, b: 5}, {a: 1, b: 2} ], 'b')
  *  // => false
@@ -2182,7 +2459,7 @@ function isUpper ( str ) {
  *  _.each()
  */
 function getCase ( str ) {
-    
+
     if( isUpper( str ) ){
         return 'upper'
     }
@@ -2194,7 +2471,7 @@ function getCase ( str ) {
     if( isCamel( str ) ){
         return 'camel'
     }
-    
+
     if( isKebab( str ) ){
         return 'kebab'
     }
@@ -2269,7 +2546,7 @@ function isCase ( theCase, str ) {
  * @param       {mixed}                 values      The value or values to search for
  * @param       {number}                fromIndex   The index to search from.
  * @returns     {boolean}   Returns `true` based on the result of _.includes
- * @example 
+ * @example
  *  _.includesAll( [1,2,3], [1,3] )
  *  // => true
  *  _.includesAll( [1,2,3], [1,2], 2 )
@@ -2354,10 +2631,10 @@ function minOf() {
  * @returns     {number}            Levenshtein distance value
  * @note        ALPHA PHASE - Under Construction
  * @todo    Create unit tests
- * @example 
+ * @example
  *  levenshtein( 'foo','foo' )
  *  // => 0
- *  levenshtein( 'foo','bar' ) 
+ *  levenshtein( 'foo','bar' )
  *  // => 3
  */
 function levenshtein ( strA, strB ) {
@@ -2415,10 +2692,10 @@ function levenshtein ( strA, strB ) {
  * @param       {(string|number)}    strB    String .... Yep, B
  * @returns     {number}            Levenshtein distance percentage (WITHOUT the % on the end)
  * @todo    Create unit tests
- * @example 
+ * @example
  *  strDist( 'foo','foo' )
  *  // => 0
- *  strDist( 'foo','bar' ) 
+ *  strDist( 'foo','bar' )
  *  // => 100
  *  strDist( 'something', 'somewhere' )
  *  // => 44.44
@@ -2446,7 +2723,7 @@ function isCountable( noun ){
  * @param       {string}    str     Singular format of a noun
  * @returns     {string}            Plural version of same noun
  * @todo    Create unit tests
- * @example 
+ * @example
  *  _.plural( 'apple' )
  *  // => apples
  *  _.plural( 'toy' )
@@ -2460,16 +2737,16 @@ function plural( str ){
             // If the y has a vowel before it (i.e. toys), then you just add the s.
             return str + 's';
         }
-        
+
         // If a this ends in y with a consonant before it (fly), you drop the y and add -ies to make it plural.
         return str.slice(0, -1) + 'ies';
     }
-    
+
     if ( str.substring( str.length - 2) === 'us') {
         // ends in us -> i, needs to preceede the generic 's' rule
         return str.slice(0, -2) + 'i';
     }
-    
+
     if (['ch', 'sh'].indexOf( str.substring( str.length - 2)) !== -1 || ['x','s'].indexOf(str.lastChar()) !== -1) {
         // If a this ends in ch, sh, x, s, you add -es to make it plural.
         return str + 'es';
@@ -2485,13 +2762,13 @@ function plural( str ){
  *      _.merge( {}, ObjsA, ObjsB )
  * would be the same as
  *      _.mergeObjs( ObjsA, ObjsB )
- * 
+ *
  * @name        module:_.mergeObjs
  * @function    module:_.mergeObjs
  * @memberof    module:_
  * @param   {...object} [sources] The source objects
  * @returns {object}    Newly merged object
- * @example 
+ * @example
  *  _.mergeObjs( { a: 1 }, { b: 2 }, { c: 3 } )
  *  // => { a: 1, b: 2, c: 3 }
  */
@@ -2518,7 +2795,7 @@ function matches( source ) {
  * @param       {Mixed}     item            Item/Error/Whatever
  * @param       {Mixed}     [type=Error]    Exception type (Default: Error)
  * @returns     {Mixed}     Returns an instance of Error, or whatevers specified by item
- * @example 
+ * @example
  *  let err = 'Error Str'
  *  // => Error Str
  *  err = _.setException( err )
@@ -2547,12 +2824,12 @@ function setException( item, type ){
  * @note    This method mutates the array, just as _.pull does
  * @param       {array}   arr   Array to sample
  * @returns     {Mixed}         Whatever element was sampled from the array
- * @example 
+ * @example
  *  var data = [ 100, 200 ]
- *  _.pullSample( data )  
- *  // => 200                   
- *  _.pullSample( data )  
- *  // => 100           
+ *  _.pullSample( data )
+ *  // => 200
+ *  _.pullSample( data )
+ *  // => 100
  *  _.pullSample( data )
  *  // => []
  */
@@ -2587,7 +2864,7 @@ function pullSample( arr ){
  * @param   {array}   arr   Array to sample
  * @param   {number}  size  Amount of elements to sample/remove from arr
  * @returns {array}         Array of one or more elements from arr
- * @example 
+ * @example
  *  var data = [ 100, 200, 300, 400 ]
  *  _.pullSampleSize( data, 2 )  // [ 100, 200 ]
  *  _.pullSampleSize( data, 2 )  // [ 300, 400 ]
@@ -2667,7 +2944,7 @@ function validPattern( pattern, flags, reason ) {
         if( reason === true ){
             return `Illegal pattern value type, expecting a 'string', 'number' or RegExp object - received a '${ptrnType}'`
         }
-        
+
         return false
     }
 
@@ -2676,7 +2953,7 @@ function validPattern( pattern, flags, reason ) {
         if( reason === true ){
             return `Illegal flag value type, expecting type 'string' or nothing - received a '${getTypeof( flags )}'`
         }
-        
+
         return false
     }
 
@@ -2734,10 +3011,10 @@ function validPattern( pattern, flags, reason ) {
  * @function    module:_.typeof
  * @memberof    module:_
  * @param       {*}         value           Value to process
- * @param       {boolean}   inspect         Determine if the true value type should be determined through logical 
+ * @param       {boolean}   inspect         Determine if the true value type should be determined through logical
  *                                          processing
  * @param       {object}    returnTypes     Object of return type strings to overwrite
- * @param       {object}    flaggedVals     Values used to determine the real value types of flagged values (Only used 
+ * @param       {object}    flaggedVals     Values used to determine the real value types of flagged values (Only used
  *                                          if scrutinize is enabled)
  * @returns     {string}    The variable type; The default type names are:
  *                          undefined, null, string, boolean, array, element, date, regexp, object, number, function, unknown
@@ -2890,6 +3167,7 @@ const defaultMixins = {
     typeof: getTypeof,
     censor: censor,
     plural: plural,
+    isType: isType,
     isUniq: isUniq,
     sortObj: sortObj,
     isSnake: isSnake,
@@ -2923,6 +3201,7 @@ const defaultMixins = {
     levenshtein: levenshtein,
     includesAll: includesAll,
     validPattern: validPattern,
+    firstDefault: firstDefault,
     passwordHash: passwordHash,
     setException: setException,
     multiReplace: multiReplace,
