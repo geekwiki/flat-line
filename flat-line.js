@@ -13,7 +13,7 @@
  * @author Justin Hyland (Mostly)
  * @url https://github.com/SASSET/flat-line
  * @see https://github.com/SASSET/flat-line
- * @version 0.1.0
+ * @version 0.2.1
  * @todo Split all functions into separate .js files; which can all be loaded by loading the index
  */
 
@@ -3152,6 +3152,52 @@ function getTypeof ( value, inspect, returnTypes, flaggedVals ) {
     /* $lab:coverage:on$ */
 }
 
+function isTypeEmpty ( type, value ){
+  if ( ! type ){
+    throw new TypeError( 'Type not specified' )
+    return
+  }
+
+  if ( _.isEmpty( value ) )
+    return true
+
+  return getTypeof( value ) !== type
+}
+
+function isStrEmpty ( value ){
+  return isTypeEmpty( 'string', value )
+}
+
+function isDateEmpty ( value ){
+  return isTypeEmpty( 'date', value )
+}
+
+function isRegexEmpty ( value ){
+  return isTypeEmpty( 'regexp', value )
+}
+
+function isArrEmpty ( value ){
+  return isTypeEmpty( 'array', value )
+}
+
+function isObjEmpty ( value ){
+  return isTypeEmpty( 'object', value )
+}
+
+function isNumEmpty ( value ){
+  return isTypeEmpty( 'number', value )
+}
+
+function isIntEmpty ( value ){
+  return isTypeEmpty( 'integer', value )
+}
+
+function isFloatEmpty ( value ){
+  return isTypeEmpty( 'float', value )
+}
+
+
+
 const defaultMixins = {
     md5: md5,
     swap: swap,
@@ -3209,7 +3255,16 @@ const defaultMixins = {
     passwordVerify: passwordVerify,
     pullSampleSize: pullSampleSize,
     summarizePaths: sumPaths,
-    stripCommonRoot: stripCommonRoot
+    stripCommonRoot: stripCommonRoot,
+    isTypeEmpty: isTypeEmpty,
+    isArrEmpty: isArrEmpty,
+    isStrEmpty: isStrEmpty, 
+    isDateEmpty: isDateEmpty,
+    isRegexEmpty: isRegexEmpty,
+    isObjEmpty: isObjEmpty,
+    isNumEmpty: isNumEmpty,
+    isIntEmpty: isIntEmpty,
+    isFloatEmpty: isFloatEmpty
 }
 
 // Mixin the above functions into the fresh version of Lodash....
